@@ -6,6 +6,10 @@
 " License: GPLv3
 "=============================================================================
 
+"global buf for line indent
+let g:line_indent = 0  
+
+
 " Loadding SpaceVim api {{{
 scriptencoding utf-8
 let s:MPT = SpaceVim#api#import('prompt')
@@ -30,7 +34,7 @@ let [
 let s:grep_timer_id = -1
 let s:preview_timer_id = -1
 let s:grepid = 0
-let s:grep_history = []
+let s:grep_history = ['','','','','','','','','','','','','','','','','','','','','','','','','','','','','','']
 let s:complete_input_history_num = [0,0]
 " }}}
 
@@ -148,6 +152,13 @@ function! s:flygrep(expr) abort
   endtr
   hi def link FlyGrepPattern MoreMsg
   let s:hi_id = s:matchadd('FlyGrepPattern', s:expr_to_pattern(a:expr), 2)
+  "if no restart , line_indent show be reset
+  if g:flygrep_status !=# 'restart'
+    let g:line_indent = 0 
+  else
+    let g:flygrep_status = 'run'
+  endif
+  
   let s:grep_expr = a:expr
   call timer_stop(s:grep_timer_id)
   let s:grep_timer_id = timer_start(200, function('s:grep_timer'), {'repeat' : 1})
@@ -294,6 +305,12 @@ function! s:grep_stderr(id, data, event) abort
 endfunction
 
 function! s:grep_exit(id, data, event) abort
+  "in restart case, line show back to line_indent
+  if g:line_indent != 0
+    exe "normal! " . g:line_indent . "j"
+  endif
+  redraw
+
   redrawstatus
   let s:grepid = 0
 endfunction
@@ -306,8 +323,10 @@ endfunction
 function! s:next_item() abort
   if line('.') == line('$')
     normal! gg
+    let g:line_indent = 0 
   else
     normal! j
+    let g:line_indent = g:line_indent + 1
   endif
   if s:preview_able == 1
     call s:preview()
@@ -360,8 +379,10 @@ endfunction
 function! s:previous_item() abort
   if line('.') == 1
     normal! G
+    let g:line_indent = line('$') -1
   else
     normal! k
+    let g:line_indent = g:line_indent - 1
   endif
   if s:preview_able == 1
     call s:preview()
@@ -371,27 +392,46 @@ function! s:previous_item() abort
   redrawstatus
 endfunction
 
+let s:grep_history_max = 30
+let s:grep_history_head = 0
+let s:grep_history_front = 0
+let s:grep_history_current = 0 
+let s:grep_history_old_front = s:grep_history_max -1
+
+function! s:add_history(grep_expr) abort
+
+  if ( (a:grep_expr !=# '') && (a:grep_expr !=# s:grep_history[ s:grep_history_old_front ]))
+    let s:grep_history_old_front = s:grep_history_front
+    let s:grep_history_front = (s:grep_history_front + 1) % s:grep_history_max
+    if( s:grep_history_front == s:grep_history_head )
+      let s:grep_history_head = (s:grep_history_head + 1) % s:grep_history_max
+    endif
+    let  s:grep_history[ s:grep_history_old_front ] = a:grep_expr
+    let s:grep_history_current = s:grep_history_old_front 
+  endif
+
+endfunction
+
 function! s:open_item() abort
-  call add(s:grep_history, s:grep_expr)
-  let s:MPT._handle_fly = function('s:flygrep')
-  if getline('.') !=# ''
-    if s:grepid != 0
-      call s:JOB.stop(s:grepid)
-    endif
-    call s:MPT._clear_prompt()
-    let s:MPT._quit = 1
-    let line = getline('.')
-    let filename = fnameescape(split(line, ':\d\+:')[0])
-    let linenr = matchstr(line, ':\d\+:')[1:-2]
-    let colum = matchstr(line, '\(:\d\+\)\@<=:\d\+:')[1:-2]
-    if s:preview_able == 1
-      pclose
-    endif
-    let s:preview_able = 0
-    noautocmd q
-    exe 'e ' . filename
-    call cursor(linenr, colum)
-    noautocmd normal! :
+   call s:add_history(s:grep_expr)
+   let s:MPT._handle_fly = function('s:flygrep')
+   if getline('.') !=# ''
+     
+     if s:grepid != 0
+       call s:JOB.stop(s:grepid)
+     endif
+     
+     let line = getline('.')
+     let filename = fnameescape(split(line, ':\d\+:')[0])
+     let linenr = matchstr(line, ':\d\+:')[1:-2]
+     let colum = matchstr(line, '\(:\d\+\)\@<=:\d\+:')[1:-2]
+     exe "normal! \<c-w>p"
+     exe 'e ' . filename
+     call cursor(linenr, colum)
+     exe "normal \<c-w>p"
+     redraw
+     call s:MPT._build_prompt()
+     redrawstatus
   endif
 endfunction
 
@@ -484,44 +524,23 @@ endfunction
 
 let s:complete_input_history_base = ''
 function! s:previous_match_history() abort
-  if s:complete_input_history_num == [0,0]
-    let s:complete_input_history_base = s:MPT._prompt.begin
-    let s:MPT._prompt.cursor = ''
-    let s:MPT._prompt.end = ''
-  else
-    let s:MPT._prompt.begin = s:complete_input_history_base
+  if( s:grep_history_current != s:grep_history_head )
+    let s:grep_history_current = (s:grep_history_current + s:grep_history_max -1 ) % s:grep_history_max
+    let s:MPT._prompt.begin = s:grep_history[s:grep_history_current] 
+    normal! "_ggdG
+    call s:MPT._handle_fly(s:MPT._prompt.begin . s:MPT._prompt.cursor .s:MPT._prompt.end)
   endif
-  let s:complete_input_history_num[0] += 1
-  let s:MPT._prompt.begin = s:complete_input_history(s:complete_input_history_base, s:complete_input_history_num)
-  normal! "_ggdG
-  call s:MPT._handle_fly(s:MPT._prompt.begin . s:MPT._prompt.cursor .s:MPT._prompt.end)
 endfunction
 
 function! s:next_match_history() abort
-
-  if s:complete_input_history_num == [0,0]
-    let s:complete_input_history_base = s:MPT._prompt.begin
-    let s:MPT._prompt.cursor = ''
-    let s:MPT._prompt.end = ''
-  else
-    let s:MPT._prompt.begin = s:complete_input_history_base
-  endif
-  let s:complete_input_history_num[1] += 1
-  let s:MPT._prompt.begin = s:complete_input_history(s:complete_input_history_base, s:complete_input_history_num)
-  normal! "_ggdG
-  call s:MPT._handle_fly(s:MPT._prompt.begin . s:MPT._prompt.cursor .s:MPT._prompt.end)
-endfunction
-
-function! s:complete_input_history(str,num) abort
-  let results = filter(copy(s:grep_history), "v:val =~# '^' . a:str")
-  if len(results) > 0
-    call add(results, a:str)
-    let index = ((len(results) - 1) - a:num[0] + a:num[1]) % len(results)
-    return results[index]
-  else
-    return a:str
+  if(s:grep_history_current != s:grep_history_old_front)
+    let s:grep_history_current = (s:grep_history_current + 1 ) % s:grep_history_max
+    let s:MPT._prompt.begin = s:grep_history[s:grep_history_current] 
+    normal! "_ggdG
+    call s:MPT._handle_fly(s:MPT._prompt.begin . s:MPT._prompt.cursor .s:MPT._prompt.end)
   endif
 endfunction
+
 let s:MPT._function_key = {
       \ "\<Tab>" : function('s:next_item'),
       \ "\<C-j>" : function('s:next_item'),
@@ -575,7 +594,7 @@ function! SpaceVim#plugins#flygrep#open(agrv) abort
   let s:MPT._handle_fly = function('s:flygrep')
   noautocmd rightbelow split __flygrep__
   let s:flygrep_buffer_id = bufnr('%')
-  setlocal buftype=nofile bufhidden=wipe nobuflisted nolist noswapfile nowrap cursorline nospell nonu norelativenumber
+  setlocal buftype=nofile bufhidden=wipe  nolist noswapfile nowrap cursorline nospell  norelativenumber
   let save_tve = &t_ve
   setlocal t_ve=
   if has('gui_running')
