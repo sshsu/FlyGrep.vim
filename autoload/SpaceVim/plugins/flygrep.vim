@@ -396,7 +396,7 @@ let s:grep_history_max = 30
 let s:grep_history_head = 0
 let s:grep_history_front = 0
 let s:grep_history_current = 0 
-let s:grep_history_old_front = s:grep_history_max -1
+let s:grep_history_old_front = 0 
 
 function! s:add_history(grep_expr) abort
 
